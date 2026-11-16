@@ -1,0 +1,74 @@
+
+name: Build Cockpit Tools - Jetson ARM64
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04-arm
+    timeout-minutes: 180
+
+    env:
+      CARGO_BUILD_JOBS: "2"
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_RELEASE_OPT_LEVEL: "2"
+      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "8"
+      NODE_OPTIONS: "--max-old-space-size=8192"
+
+    steps:
+      - name: Checkout Cockpit Tools v1.4.0
+        uses: actions/checkout@v4
+        with:
+          repository: jlcodes99/cockpit-tools
+          ref: v1.4.0
+          path: source
+
+      - name: Install Ubuntu dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential pkg-config \
+            libssl-dev libgtk-3-dev \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev libxdo-dev \
+            patchelf file
+
+      - name: Setup Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: source/package-lock.json
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install npm dependencies
+        working-directory: source
+        run: npm ci
+
+      - name: Build Linux ARM64 executable
+        working-directory: source
+        run: npm run tauri -- build --no-bundle
+
+      - name: Check binary
+        working-directory: source
+        run: |
+          file target/release/cockpit-tools
+          ls -lh target/release/cockpit-tools
+          readelf --version-info target/release/cockpit-tools \
+            | grep -oE 'GLIBC_[0-9.]+' \
+            | sort -Vu | tail -5
+
+      - name: Upload ARM64 executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: cockpit-tools-v1.4.0-ubuntu22-arm64
+          path: source/target/release/cockpit-tools
+          if-no-files-found: error
+          retention-days: 7
